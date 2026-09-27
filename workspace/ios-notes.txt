@@ -1,0 +1,12 @@
+Dependency Injection:
+A class should receive its dependencies from outside instead of creating them internally.
+
+Combine:
+Publisher sends values.
+Subscriber receives values.
+PassthroughSubject is event based.
+CurrentValueSubject stores the latest value.
+
+Swift Concurrency:
+async/await is used for asynchronous operations.
+Actor helps protect mutable shared state.
