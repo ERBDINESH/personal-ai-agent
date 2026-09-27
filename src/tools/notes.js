@@ -1,18 +1,16 @@
 const fs = require("fs");
 const path = require("path");
 
-const workspacePath = path.join(__dirname, "..", "workspace");
+const workspacePath = path.join(__dirname, "..", "..", "workspace");
 const personalNotesPath = path.join(workspacePath, "personal-notes.txt");
 
-function searchFiles(query) {
+function searchNotes(query) {
   const files = fs.readdirSync(workspacePath);
-
   const results = [];
   const normalizedQuery = query.toLowerCase();
 
   for (const file of files) {
     const filePath = path.join(workspacePath, file);
-
     const stats = fs.lstatSync(filePath);
 
     if (!stats.isFile()) {
@@ -63,6 +61,6 @@ function saveNote(note) {
 }
 
 module.exports = {
-  searchFiles,
+  searchNotes,
   saveNote,
 };
