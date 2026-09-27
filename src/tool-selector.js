@@ -26,23 +26,28 @@ function parseToolSelection(output, availableTools) {
     if (
       typeof selection.tool !== "string" ||
       !selection.tool.trim() ||
-      typeof selection.input !== "string" ||
-      !selection.input.trim()
+      typeof selection.input !== "string"
     ) {
       return { type: "CHAT" };
     }
 
-    const allowedToolNames = new Set(availableTools.map((tool) => tool.name));
     const toolName = selection.tool.trim();
+    const selectedTool = availableTools.find((tool) => tool.name === toolName);
 
-    if (!allowedToolNames.has(toolName)) {
+    if (!selectedTool) {
+      return { type: "CHAT" };
+    }
+
+    const input = selection.input.trim();
+
+    if (selectedTool.requiresInput !== false && !input) {
       return { type: "CHAT" };
     }
 
     return {
       type: "TOOL",
       tool: toolName,
-      input: selection.input.trim(),
+      input,
     };
   } catch {
     return { type: "CHAT" };
@@ -51,10 +56,11 @@ function parseToolSelection(output, availableTools) {
 
 async function selectTool(message, availableTools) {
   const toolList = availableTools.map(
-    ({ name, description, inputDescription }) => ({
+    ({ name, description, inputDescription, requiresInput }) => ({
       name,
       description,
       inputDescription,
+      requiresInput,
     }),
   );
 
@@ -79,6 +85,7 @@ Rules:
 - Use a tool only when the user's request requires that capability.
 - Use CHAT for general knowledge, explanations, or conversation.
 - Extract concise tool input without command words.
+- Tools with requiresInput false must use an empty string for input.
 - Do not execute or suggest shell commands.
 
 Examples:
@@ -90,6 +97,9 @@ User: Do I have anything about actors in my notes?
 
 User: Save a note that Swift actors protect shared state
 {"type":"TOOL","tool":"save_note","input":"Swift actors protect shared state"}
+
+User: What notes do I have?
+{"type":"TOOL","tool":"list_notes","input":""}
 
 User: Explain actor isolation
 {"type":"CHAT"}

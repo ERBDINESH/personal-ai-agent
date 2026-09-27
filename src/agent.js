@@ -59,39 +59,20 @@ Do not redefine Tanglish as Singaporean or Bruneian usage.
   return { answer };
 }
 
-function handleNoteTool(toolName, input, agentMessage) {
+function handleTool(toolName, input, agentMessage) {
   const toolResult = executeTool(toolName, input);
 
-  if (toolName === "save_note") {
-    const saved = toolResult.ok && toolResult.result;
-
-    return {
-      agentMessage,
-      answer: saved ? "Saved." : "I couldn't save that note.",
-    };
-  }
-
-  if (toolName === "search_notes") {
-    const results = toolResult.ok ? toolResult.result : [];
-    const answer =
-      results.length > 0
-        ? results.map((result) => result.snippet).join("\n\n")
-        : "I couldn't find relevant information in your notes.";
-
-    return {
-      agentMessage,
-      answer,
-    };
-  }
-
-  return null;
+  return {
+    agentMessage,
+    answer: toolResult.answer || "I couldn't use that tool.",
+  };
 }
 
 async function handleMessage(message) {
   const action = await routeMessage(message);
 
   if (action.type === "SAVE_NOTE") {
-    return handleNoteTool("save_note", action.note, "Saving note...");
+    return handleTool("save_note", action.note, "Saving note...");
   }
 
   if (action.type === "SAVE_MEMORY") {
@@ -108,7 +89,7 @@ async function handleMessage(message) {
   }
 
   if (action.type === "SEARCH") {
-    return handleNoteTool(
+    return handleTool(
       "search_notes",
       action.query,
       `Searching workspace for "${action.query}"...`,
@@ -122,15 +103,11 @@ async function handleMessage(message) {
   const selection = await selectTool(message, getAvailableTools());
 
   if (selection.type === "TOOL") {
-    const result = handleNoteTool(
+    return handleTool(
       selection.tool,
       selection.input,
       `Using tool "${selection.tool}"...`,
     );
-
-    if (result) {
-      return result;
-    }
   }
 
   return handleChat(message);

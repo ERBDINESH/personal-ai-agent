@@ -60,7 +60,26 @@ function saveNote(note) {
   }
 }
 
+function listNotes() {
+  try {
+    return fs
+      .readdirSync(workspacePath)
+      .filter((file) => {
+        try {
+          const filePath = path.join(workspacePath, file);
+          return fs.lstatSync(filePath).isFile();
+        } catch {
+          return false;
+        }
+      })
+      .sort();
+  } catch {
+    return null;
+  }
+}
+
 module.exports = {
+  listNotes,
   searchNotes,
   saveNote,
 };
