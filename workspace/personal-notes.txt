@@ -1,2 +1,0 @@
-DI improves testability
-XCTest improves testability
