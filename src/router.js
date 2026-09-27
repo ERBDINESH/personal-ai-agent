@@ -1,5 +1,3 @@
-const { callModel } = require("./model");
-
 function getNoteFromSaveRequest(message) {
   const savePatterns = [
     /^remember\s+this(?:\s*[-:]\s*|\s+)(.*)$/i,
@@ -72,7 +70,14 @@ function getSearchQuery(message) {
   return null;
 }
 
-async function routeMessage(message) {
+function isKnownChatRequest(message) {
+  const isGeneralQuestion = /^(what is|explain|teach me)\b/i.test(message);
+  const mentionsLocalContent = /\b(my notes|my files|workspace)\b/i.test(message);
+
+  return isGeneralQuestion && !mentionsLocalContent;
+}
+
+function routeMessage(message) {
   const note = getNoteFromSaveRequest(message);
 
   if (note !== null) {
@@ -91,79 +96,11 @@ async function routeMessage(message) {
     return { type: "SEARCH", query };
   }
 
-  const decision = await callModel([
-    {
-      role: "system",
-      content: `
-You are a routing component for a personal AI agent.
-
-Your job is ONLY to decide whether the user wants information from their own local notes/files.
-
-Return exactly one of these formats:
-
-SEARCH: <single best search keyword>
-CHAT
-
-Rules:
-
-Use SEARCH when the user refers to:
-- my notes
-- my files
-- what did I write
-- what do I have about something
-- find something in my notes
-- ennoda notes
-- naan eluthunathu
-- notes find pannu
-- workspace content
-
-Extract ONLY the main technical topic as the keyword.
-
-Examples:
-
-User: ennoda Combine notes find pannu
-SEARCH: Combine
-
-User: What did I write about Actor?
-SEARCH: Actor
-
-User: ennoda UIKit notes enna?
-SEARCH: UIKit
-
-User: What notes do I have about Dependency Injection?
-SEARCH: Dependency Injection
-
-User: Explain Combine
-CHAT
-
-User: What is MVVM?
-CHAT
-
-User: Teach me Actor
-CHAT
-
-Do not include words such as:
-my, ennoda, notes, find, pannu, what, about, write.
-
-Respond with ONE LINE only.
-`,
-    },
-    {
-      role: "user",
-      content: message,
-    },
-  ]);
-
-  const firstLine = decision.trim().split("\n")[0];
-
-  if (firstLine.startsWith("SEARCH:")) {
-    return {
-      type: "SEARCH",
-      query: firstLine.substring(7).trim(),
-    };
+  if (isKnownChatRequest(message)) {
+    return { type: "CHAT" };
   }
 
-  return { type: "CHAT" };
+  return { type: "UNRESOLVED" };
 }
 
 module.exports = {

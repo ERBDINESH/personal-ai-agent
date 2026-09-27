@@ -1,7 +1,8 @@
 const { callModel } = require("./model");
 const { routeMessage } = require("./router");
+const { selectTool } = require("./tool-selector");
 const { loadMemory, updateMemory } = require("./memory");
-const { executeTool } = require("./tools");
+const { executeTool, getAvailableTools } = require("./tools");
 
 const messages = [];
 let userMemory = loadMemory();
@@ -58,17 +59,39 @@ Do not redefine Tanglish as Singaporean or Bruneian usage.
   return { answer };
 }
 
+function handleNoteTool(toolName, input, agentMessage) {
+  const toolResult = executeTool(toolName, input);
+
+  if (toolName === "save_note") {
+    const saved = toolResult.ok && toolResult.result;
+
+    return {
+      agentMessage,
+      answer: saved ? "Saved." : "I couldn't save that note.",
+    };
+  }
+
+  if (toolName === "search_notes") {
+    const results = toolResult.ok ? toolResult.result : [];
+    const answer =
+      results.length > 0
+        ? results.map((result) => result.snippet).join("\n\n")
+        : "I couldn't find relevant information in your notes.";
+
+    return {
+      agentMessage,
+      answer,
+    };
+  }
+
+  return null;
+}
+
 async function handleMessage(message) {
   const action = await routeMessage(message);
 
   if (action.type === "SAVE_NOTE") {
-    const toolResult = executeTool("save_note", action.note);
-    const saved = toolResult.ok && toolResult.result;
-
-    return {
-      agentMessage: "Saving note...",
-      answer: saved ? "Saved." : "I couldn't save that note.",
-    };
+    return handleNoteTool("save_note", action.note, "Saving note...");
   }
 
   if (action.type === "SAVE_MEMORY") {
@@ -85,17 +108,29 @@ async function handleMessage(message) {
   }
 
   if (action.type === "SEARCH") {
-    const toolResult = executeTool("search_notes", action.query);
-    const results = toolResult.ok ? toolResult.result : [];
-    const answer =
-      results.length > 0
-        ? results.map((result) => result.snippet).join("\n\n")
-        : "I couldn't find relevant information in your notes.";
+    return handleNoteTool(
+      "search_notes",
+      action.query,
+      `Searching workspace for "${action.query}"...`,
+    );
+  }
 
-    return {
-      agentMessage: `Searching workspace for "${action.query}"...`,
-      answer,
-    };
+  if (action.type === "CHAT") {
+    return handleChat(message);
+  }
+
+  const selection = await selectTool(message, getAvailableTools());
+
+  if (selection.type === "TOOL") {
+    const result = handleNoteTool(
+      selection.tool,
+      selection.input,
+      `Using tool "${selection.tool}"...`,
+    );
+
+    if (result) {
+      return result;
+    }
   }
 
   return handleChat(message);
