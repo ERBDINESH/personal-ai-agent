@@ -73,6 +73,48 @@ test("reports each required malformed input", () => {
   }
 });
 
+test("allows only the explicit command to select Forex research", () => {
+  const command =
+    "/forex USD | Growth outlook | positive | Growth improved";
+  const action = routeMessage(command);
+
+  assert.deepEqual(action, {
+    type: "TOOL",
+    tool: "forex_research",
+    input: "USD | Growth outlook | positive | Growth improved",
+  });
+  assert.match(
+    executeTool(action.tool, action.input).answer,
+    /Overall: Positive/,
+  );
+
+  const genericTools = getAvailableTools();
+
+  assert.equal(
+    genericTools.some((tool) => tool.name === "forex_research"),
+    false,
+  );
+  assert.deepEqual(
+    parseToolSelection(
+      '{"type":"TOOL","tool":"forex_research","input":"USD"}',
+      genericTools,
+    ),
+    { type: "CHAT" },
+  );
+});
+
+test("keeps non-command Forex-like input and hello on the chat path", () => {
+  assert.deepEqual(
+    routeMessage("Growth outlook | positive | Growth improved"),
+    { type: "UNRESOLVED" },
+  );
+  assert.deepEqual(routeMessage("hello"), { type: "UNRESOLVED" });
+  assert.deepEqual(
+    parseToolSelection('{"type":"CHAT"}', getAvailableTools()),
+    { type: "CHAT" },
+  );
+});
+
 test("preserves existing note routes and generic list selection", () => {
   assert.deepEqual(routeMessage("Save this note: Review Swift actors"), {
     type: "SAVE_NOTE",

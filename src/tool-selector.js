@@ -1,5 +1,12 @@
 const { callModel } = require("./model");
 
+function isBareForexInput(message) {
+  const factorPattern =
+    /^(?:[^|;\r\n]+\|\s*){1,2}(?:positive|negative|neutral)\s*\|[^|;\r\n]+(?:\s*;\s*[^|;\r\n]+\|\s*(?:positive|negative|neutral)\s*\|[^|;\r\n]+)*$/i;
+
+  return factorPattern.test(message.trim());
+}
+
 function parseToolSelection(output, availableTools) {
   try {
     const selection = JSON.parse(output.trim());
@@ -55,6 +62,10 @@ function parseToolSelection(output, availableTools) {
 }
 
 async function selectTool(message, availableTools) {
+  if (isBareForexInput(message)) {
+    return { type: "CHAT" };
+  }
+
   const toolList = availableTools.map(
     ({ name, description, inputDescription, requiresInput }) => ({
       name,

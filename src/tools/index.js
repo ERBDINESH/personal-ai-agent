@@ -55,6 +55,7 @@ const tools = {
     description: "Generate a deterministic research report for a currency",
     inputDescription: FOREX_USAGE.replace("/forex ", ""),
     requiresInput: true,
+    allowGenericSelection: false,
     allowMissingInput: true,
     execute: runForexResearch,
     formatResult: formatForexResult,
@@ -63,14 +64,14 @@ const tools = {
 };
 
 function getAvailableTools() {
-  return Object.values(tools).map(
-    ({ name, description, inputDescription, requiresInput }) => ({
+  return Object.values(tools)
+    .filter((tool) => tool.allowGenericSelection !== false)
+    .map(({ name, description, inputDescription, requiresInput }) => ({
       name,
       description,
       inputDescription,
       requiresInput,
-    }),
-  );
+    }));
 }
 
 function executeTool(name, input) {
