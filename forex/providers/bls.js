@@ -4,7 +4,16 @@ const BLS_CPI_SERIES_ID = "CUUR0000SA0";
 const BLS_CPI_URL =
   `https://api.bls.gov/publicAPI/v2/timeseries/data/${BLS_CPI_SERIES_ID}` +
   "?latest=true";
+const BLS_HISTORICAL_URL =
+  "https://api.bls.gov/publicAPI/v2/timeseries/data/";
+const BLS_CPI_MOM_SERIES_ID = "CUSR0000SA0";
+const BLS_CPI_YOY_SERIES_ID = "CUUR0000SA0";
+const BLS_CPI_CHANGE_SERIES_IDS = Object.freeze([
+  BLS_CPI_MOM_SERIES_ID,
+  BLS_CPI_YOY_SERIES_ID,
+]);
 const BLS_SUCCESS_STATUS = "REQUEST_SUCCEEDED";
+const BLS_UNAVAILABLE_VALUE = "-";
 
 function getFetchedAt(now) {
   let value;
@@ -68,6 +77,172 @@ function validateDataPoint(dataPoint) {
     numericValue,
     latest: dataPoint.latest ?? null,
     footnotes: dataPoint.footnotes ?? [],
+  };
+}
+
+function normalizeMonthlyCpiPeriod(seriesId, dataPoint) {
+  if (typeof seriesId !== "string" || !seriesId.trim()) {
+    throw new TypeError("BLS CPI series ID must be a non-empty string.");
+  }
+
+  if (!dataPoint || typeof dataPoint !== "object" || Array.isArray(dataPoint)) {
+    throw new Error("BLS monthly CPI data point must be an object.");
+  }
+
+  if (typeof dataPoint.year !== "string" || !/^\d{4}$/.test(dataPoint.year)) {
+    throw new Error("BLS monthly CPI data point has a malformed year.");
+  }
+
+  if (
+    typeof dataPoint.period !== "string" ||
+    !/^M(?:0[1-9]|1[0-2])$/.test(dataPoint.period)
+  ) {
+    throw new Error(
+      "BLS monthly CPI period must be between M01 and M12; M13 is annual.",
+    );
+  }
+
+  if (
+    typeof dataPoint.periodName !== "string" ||
+    !dataPoint.periodName.trim()
+  ) {
+    throw new Error("BLS monthly CPI data point is missing periodName.");
+  }
+
+  return {
+    seriesId: seriesId.trim(),
+    year: dataPoint.year,
+    month: Number(dataPoint.period.slice(1)),
+    period: dataPoint.period,
+    periodName: dataPoint.periodName.trim(),
+  };
+}
+
+function normalizeMonthlyCpiDataPoint(seriesId, dataPoint) {
+  const period = normalizeMonthlyCpiPeriod(seriesId, dataPoint);
+
+  if (
+    typeof dataPoint.value !== "string" ||
+    !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(dataPoint.value.trim())
+  ) {
+    throw new Error("BLS monthly CPI data point value must be numeric.");
+  }
+
+  const numericValue = Number(dataPoint.value);
+
+  if (!Number.isFinite(numericValue)) {
+    throw new Error("BLS monthly CPI data point value must be numeric.");
+  }
+
+  return {
+    ...period,
+    value: dataPoint.value.trim(),
+    numericValue,
+  };
+}
+
+function sortMonthlyCpiDataPoints(dataPoints) {
+  return [...dataPoints].sort(
+    (left, right) =>
+      Number(left.year) - Number(right.year) || left.month - right.month,
+  );
+}
+
+function getCurrentYear(currentYear, fetchedAt) {
+  const value =
+    currentYear === undefined
+      ? new Date(fetchedAt).getUTCFullYear()
+      : typeof currentYear === "function"
+        ? currentYear()
+        : currentYear;
+
+  if (!Number.isInteger(value) || value < 1000 || value > 9999) {
+    throw new TypeError("currentYear must resolve to a four-digit integer.");
+  }
+
+  return value;
+}
+
+function parseHistoricalBlsResponse(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error("BLS historical response must be an object.");
+  }
+
+  if (payload.status !== BLS_SUCCESS_STATUS) {
+    throw new Error(
+      `BLS historical API request failed with status ` +
+        `"${payload.status || "unknown"}".`,
+    );
+  }
+
+  if (
+    !payload.Results ||
+    typeof payload.Results !== "object" ||
+    Array.isArray(payload.Results)
+  ) {
+    throw new Error("BLS historical response is missing Results.");
+  }
+
+  if (!Array.isArray(payload.Results.series)) {
+    throw new Error("BLS historical Results.series must be an array.");
+  }
+
+  const normalizedSeries = {};
+  const unavailableSeries = {};
+
+  for (const expectedSeriesId of BLS_CPI_CHANGE_SERIES_IDS) {
+    const series = payload.Results.series.find(
+      (candidate) => candidate && candidate.seriesID === expectedSeriesId,
+    );
+
+    if (!series) {
+      throw new Error(
+        `BLS historical response is missing series ${expectedSeriesId}.`,
+      );
+    }
+
+    if (!Array.isArray(series.data)) {
+      throw new Error(`BLS series ${expectedSeriesId} is missing data.`);
+    }
+
+    const monthlyData = [];
+    const unavailableData = [];
+
+    for (const dataPoint of series.data) {
+      if (dataPoint && dataPoint.period === "M13") {
+        continue;
+      }
+
+      const period = normalizeMonthlyCpiPeriod(expectedSeriesId, dataPoint);
+
+      if (dataPoint.value === BLS_UNAVAILABLE_VALUE) {
+        unavailableData.push({
+          ...period,
+          value: BLS_UNAVAILABLE_VALUE,
+        });
+        continue;
+      }
+
+      monthlyData.push(
+        normalizeMonthlyCpiDataPoint(expectedSeriesId, dataPoint),
+      );
+    }
+
+    if (monthlyData.length === 0 && unavailableData.length === 0) {
+      throw new Error(
+        `BLS series ${expectedSeriesId} contains no monthly data points.`,
+      );
+    }
+
+    normalizedSeries[expectedSeriesId] =
+      sortMonthlyCpiDataPoints(monthlyData);
+    unavailableSeries[expectedSeriesId] =
+      sortMonthlyCpiDataPoints(unavailableData);
+  }
+
+  return {
+    series: normalizedSeries,
+    unavailable: unavailableSeries,
   };
 }
 
@@ -194,8 +369,87 @@ async function fetchLatestBlsCpi(options = {}) {
   return parseBlsResponse(payload, getFetchedAt(now));
 }
 
+async function fetchHistoricalBlsCpi(options = {}) {
+  if (!options || typeof options !== "object" || Array.isArray(options)) {
+    throw new TypeError("BLS provider options must be an object.");
+  }
+
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+  const now = options.now ?? (() => new Date());
+
+  if (typeof fetchImpl !== "function") {
+    throw new TypeError("A fetch implementation is required.");
+  }
+
+  if (typeof now !== "function") {
+    throw new TypeError("now must be a function.");
+  }
+
+  const fetchedAt = getFetchedAt(now);
+  const endYear = getCurrentYear(options.currentYear, fetchedAt);
+  const startYear = endYear - 2;
+  const requestPayload = {
+    seriesid: [...BLS_CPI_CHANGE_SERIES_IDS],
+    startyear: String(startYear),
+    endyear: String(endYear),
+  };
+  let response;
+
+  try {
+    response = await fetchImpl(BLS_HISTORICAL_URL, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestPayload),
+    });
+  } catch (error) {
+    throw new Error(`BLS CPI history request failed: ${error.message}`);
+  }
+
+  if (!response || typeof response.ok !== "boolean") {
+    throw new Error("BLS CPI history returned an invalid HTTP response.");
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `BLS CPI history request failed with HTTP ` +
+        `${response.status || "unknown"}.`,
+    );
+  }
+
+  let payload;
+
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error("BLS CPI history response contained invalid JSON.");
+  }
+
+  const parsedHistory = parseHistoricalBlsResponse(payload);
+
+  return {
+    series: parsedHistory.series,
+    unavailable: parsedHistory.unavailable,
+    fetchedAt,
+    request: {
+      startYear: String(startYear),
+      endYear: String(endYear),
+    },
+  };
+}
+
 module.exports = {
+  BLS_CPI_CHANGE_SERIES_IDS,
+  BLS_CPI_MOM_SERIES_ID,
   BLS_CPI_SERIES_ID,
   BLS_CPI_URL,
+  BLS_CPI_YOY_SERIES_ID,
+  BLS_HISTORICAL_URL,
+  BLS_UNAVAILABLE_VALUE,
+  fetchHistoricalBlsCpi,
   fetchLatestBlsCpi,
+  normalizeMonthlyCpiDataPoint,
+  sortMonthlyCpiDataPoints,
 };
