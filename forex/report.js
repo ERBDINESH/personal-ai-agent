@@ -4,6 +4,34 @@ function capitalize(value) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+function formatCategory(category) {
+  return category.split("-").map(capitalize).join(" ");
+}
+
+function formatConfidence(confidence) {
+  return `${Number((confidence * 100).toFixed(2))}%`;
+}
+
+function formatFactor(factor, index) {
+  const lines = [
+    `${index + 1}. ${factor.name}`,
+    `   Category: ${formatCategory(factor.category)}`,
+    `   Signal: ${capitalize(factor.signal)}`,
+    `   Reason: ${factor.reason}`,
+    `   Source: ${factor.source === "manual" ? "Manual" : factor.source}`,
+  ];
+
+  if (factor.observedAt !== null) {
+    lines.push(`   Observed at: ${factor.observedAt}`);
+  }
+
+  if (factor.confidence !== null) {
+    lines.push(`   Confidence: ${formatConfidence(factor.confidence)}`);
+  }
+
+  return lines.join("\n");
+}
+
 function generateForexReport(currencyCode, factors) {
   if (typeof currencyCode !== "string" || !currencyCode.trim()) {
     throw new TypeError("Currency code must be a non-empty string.");
@@ -11,12 +39,7 @@ function generateForexReport(currencyCode, factors) {
 
   const currency = currencyCode.trim().toUpperCase();
   const result = scoreFactors(factors);
-  const factorLines = result.factors.map(
-    (factor, index) =>
-      `${index + 1}. ${factor.name}\n` +
-      `   Signal: ${capitalize(factor.signal)}\n` +
-      `   Reason: ${factor.reason}`,
-  );
+  const factorLines = result.factors.map(formatFactor);
 
   const factorsSection =
     factorLines.length > 0 ? factorLines.join("\n\n") : "No factors provided.";
