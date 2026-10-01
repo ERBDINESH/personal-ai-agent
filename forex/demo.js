@@ -13,7 +13,7 @@ const factors = [
   },
   {
     name: "Economic growth",
-    signal: "Negative",
+    signal: "neutral",
     reason: "Recent growth indicators are mixed",
   },
 ];
