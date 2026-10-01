@@ -12,6 +12,37 @@ function findObservation(dataPoints, year, month) {
   );
 }
 
+function getPreviousCalendarPeriod(year, month) {
+  return month === 1
+    ? { year: year - 1, month: 12 }
+    : { year, month: month - 1 };
+}
+
+function requireExactObservation(
+  usable,
+  unavailable,
+  year,
+  month,
+  description,
+) {
+  const observation = findObservation(usable, year, month);
+
+  if (observation) {
+    return observation;
+  }
+
+  const unavailableObservation = findObservation(unavailable, year, month);
+  const period = `M${String(month).padStart(2, "0")}`;
+
+  if (unavailableObservation) {
+    throw new Error(
+      `${description} is unavailable: ${period} ${year}.`,
+    );
+  }
+
+  throw new Error(`Missing ${description}: ${period} ${year}.`);
+}
+
 function comparePeriods(left, right) {
   return Number(left.year) - Number(right.year) || left.month - right.month;
 }
@@ -191,7 +222,102 @@ async function fetchLatestCpiChanges(options = {}) {
   return calculateCpiChanges(history);
 }
 
+function calculateCpiObservationInputs(history) {
+  const cpiChanges = calculateCpiChanges(history);
+  const unavailableSeries = history.unavailable || {};
+  const saData = sortMonthlyCpiDataPoints(
+    history.series[BLS_CPI_MOM_SERIES_ID] || [],
+  );
+  const nsaData = sortMonthlyCpiDataPoints(
+    history.series[BLS_CPI_YOY_SERIES_ID] || [],
+  );
+  const unavailableSa = sortMonthlyCpiDataPoints(
+    unavailableSeries[BLS_CPI_MOM_SERIES_ID] || [],
+  );
+  const unavailableNsa = sortMonthlyCpiDataPoints(
+    unavailableSeries[BLS_CPI_YOY_SERIES_ID] || [],
+  );
+  const referenceYear = Number(cpiChanges.referencePeriod.year);
+  const referenceMonth = cpiChanges.referencePeriod.month;
+  const previousPeriod = getPreviousCalendarPeriod(
+    referenceYear,
+    referenceMonth,
+  );
+  const monthBeforePrevious = getPreviousCalendarPeriod(
+    previousPeriod.year,
+    previousPeriod.month,
+  );
+  const previousSa = requireExactObservation(
+    saData,
+    unavailableSa,
+    previousPeriod.year,
+    previousPeriod.month,
+    `previous MoM current month for ${BLS_CPI_MOM_SERIES_ID}`,
+  );
+  const monthBeforePreviousSa = requireExactObservation(
+    saData,
+    unavailableSa,
+    monthBeforePrevious.year,
+    monthBeforePrevious.month,
+    `month before previous for ${BLS_CPI_MOM_SERIES_ID}`,
+  );
+  const previousNsa = requireExactObservation(
+    nsaData,
+    unavailableNsa,
+    previousPeriod.year,
+    previousPeriod.month,
+    `previous YoY current month for ${BLS_CPI_YOY_SERIES_ID}`,
+  );
+  const priorYearPreviousNsa = requireExactObservation(
+    nsaData,
+    unavailableNsa,
+    previousPeriod.year - 1,
+    previousPeriod.month,
+    `previous YoY comparison month for ${BLS_CPI_YOY_SERIES_ID}`,
+  );
+
+  return {
+    cpiChanges,
+    previousRates: {
+      referencePeriod: {
+        year: previousSa.year,
+        month: previousSa.month,
+        period: previousSa.period,
+        periodName: previousSa.periodName,
+      },
+      mom: {
+        seriesId: BLS_CPI_MOM_SERIES_ID,
+        current: formatObservation(previousSa),
+        previous: formatObservation(monthBeforePreviousSa),
+        percentChange: calculatePercentChange(
+          previousSa,
+          monthBeforePreviousSa,
+          "Previous MoM",
+        ),
+      },
+      yoy: {
+        seriesId: BLS_CPI_YOY_SERIES_ID,
+        current: formatObservation(previousNsa),
+        previousYear: formatObservation(priorYearPreviousNsa),
+        percentChange: calculatePercentChange(
+          previousNsa,
+          priorYearPreviousNsa,
+          "Previous YoY",
+        ),
+      },
+    },
+  };
+}
+
+async function fetchCpiObservationInputs(options = {}) {
+  const history = await fetchHistoricalBlsCpi(options);
+
+  return calculateCpiObservationInputs(history);
+}
+
 module.exports = {
   calculateCpiChanges,
+  calculateCpiObservationInputs,
+  fetchCpiObservationInputs,
   fetchLatestCpiChanges,
 };
