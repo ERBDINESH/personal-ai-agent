@@ -3,59 +3,9 @@ const {
   SIGNALS,
   SIGNAL_VALUES,
 } = require("./constants");
+const { isValidIsoDateTime } = require("./validation");
 
 const categoryValues = Object.values(FACTOR_CATEGORIES);
-
-function isLeapYear(year) {
-  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-}
-
-function isValidIsoDateTime(value) {
-  const match = value.match(
-    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(?:Z|[+-](\d{2}):(\d{2}))?$/i,
-  );
-
-  if (!match) {
-    return false;
-  }
-
-  const [, yearText, monthText, dayText, hourText, minuteText, secondText] =
-    match;
-  const year = Number(yearText);
-  const month = Number(monthText);
-  const day = Number(dayText);
-  const hour = Number(hourText);
-  const minute = Number(minuteText);
-  const second = secondText === undefined ? 0 : Number(secondText);
-  const offsetHour = match[8] === undefined ? 0 : Number(match[8]);
-  const offsetMinute = match[9] === undefined ? 0 : Number(match[9]);
-  const daysInMonth = [
-    31,
-    isLeapYear(year) ? 29 : 28,
-    31,
-    30,
-    31,
-    30,
-    31,
-    31,
-    30,
-    31,
-    30,
-    31,
-  ];
-
-  return (
-    month >= 1 &&
-    month <= 12 &&
-    day >= 1 &&
-    day <= (daysInMonth[month - 1] || 0) &&
-    hour <= 23 &&
-    minute <= 59 &&
-    second <= 59 &&
-    offsetHour <= 23 &&
-    offsetMinute <= 59
-  );
-}
 
 function validateFactor(factor, index) {
   if (!factor || typeof factor !== "object" || Array.isArray(factor)) {

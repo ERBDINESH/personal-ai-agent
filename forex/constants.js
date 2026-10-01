@@ -21,8 +21,17 @@ const FACTOR_CATEGORIES = Object.freeze({
   OTHER: "other",
 });
 
+const SOURCE_TYPES = Object.freeze({
+  OFFICIAL: "official",
+  NEWS: "news",
+  MARKET_DATA: "market-data",
+  MANUAL: "manual",
+  OTHER: "other",
+});
+
 module.exports = {
   FACTOR_CATEGORIES,
   SIGNALS,
   SIGNAL_VALUES,
+  SOURCE_TYPES,
 };
