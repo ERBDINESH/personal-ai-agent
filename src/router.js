@@ -77,7 +77,27 @@ function isKnownChatRequest(message) {
   return isGeneralQuestion && !mentionsLocalContent;
 }
 
+function getForexToolInput(message) {
+  const match = message.match(/^\/forex(?:\s+([\s\S]*))?$/i);
+
+  if (!match) {
+    return null;
+  }
+
+  return (match[1] || "").trim();
+}
+
 function routeMessage(message) {
+  const forexInput = getForexToolInput(message);
+
+  if (forexInput !== null) {
+    return {
+      type: "TOOL",
+      tool: "forex_research",
+      input: forexInput,
+    };
+  }
+
   const note = getNoteFromSaveRequest(message);
 
   if (note !== null) {

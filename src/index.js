@@ -38,6 +38,9 @@ function chat() {
 }
 
 console.log("Personal AI Agent");
-console.log("Type 'exit' to quit.\n");
+console.log("Type 'exit' to quit.");
+console.log(
+  "Forex: /forex CURRENCY | FACTOR | SIGNAL | REASON; FACTOR | SIGNAL | REASON\n",
+);
 
 chat();

@@ -1,4 +1,9 @@
 const { listNotes, searchNotes, saveNote } = require("./notes");
+const {
+  FOREX_USAGE,
+  formatForexResult,
+  runForexResearch,
+} = require("./forex");
 
 function formatSearchResults(results) {
   return results.length > 0
@@ -45,6 +50,16 @@ const tools = {
     isValidResult: Array.isArray,
     errorMessage: "I couldn't list your notes.",
   },
+  forex_research: {
+    name: "forex_research",
+    description: "Generate a deterministic research report for a currency",
+    inputDescription: FOREX_USAGE.replace("/forex ", ""),
+    requiresInput: true,
+    allowMissingInput: true,
+    execute: runForexResearch,
+    formatResult: formatForexResult,
+    errorMessage: "I couldn't generate the Forex research report.",
+  },
 };
 
 function getAvailableTools() {
@@ -70,7 +85,8 @@ function executeTool(name, input) {
 
   if (
     tool.requiresInput &&
-    (typeof input !== "string" || !input.trim())
+    (typeof input !== "string" || !input.trim()) &&
+    !tool.allowMissingInput
   ) {
     return {
       ok: false,

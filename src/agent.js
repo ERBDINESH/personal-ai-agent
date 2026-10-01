@@ -71,6 +71,14 @@ function handleTool(toolName, input, agentMessage) {
 async function handleMessage(message) {
   const action = await routeMessage(message);
 
+  if (action.type === "TOOL") {
+    return handleTool(
+      action.tool,
+      action.input,
+      `Using tool "${action.tool}"...`,
+    );
+  }
+
   if (action.type === "SAVE_NOTE") {
     return handleTool("save_note", action.note, "Saving note...");
   }
