@@ -1,4 +1,4 @@
-# Swift Chat Core — Architecture (Milestone 1)
+# Swift Personal AI — Architecture (Milestone 2A)
 
 ## Goals
 
@@ -41,6 +41,43 @@ dependencies on SwiftUI, AppKit, UIKit, Combine or Core Data.
 | `HTTPTransport` / `URLSessionTransport` | protocol / struct | A small seam over `URLSession`, so tests can inject canned responses. |
 | `ChatSession` | actor | Owns one conversation, enforces a single in-flight turn, commits history atomically, and handles cancellation. |
 | `AgentEngine` | struct | Builds context (system prompt and history window), calls the provider, validates the reply, and returns an `AgentReply`. Stateless, so one engine can serve many sessions. |
+| `ProfileMemory`, `JSONValue` | value types | Validated string facts plus lossless preservation of unknown JSON fields. |
+| `MemoryStore` | protocol | Async persistence seam used by the CLI and injectable tests. |
+| `JSONFileMemoryStore` | actor | Injected-path JSON persistence, serialized updates, one-time backup, and atomic replacement. |
+| `MessageRouter` | struct | Pure deterministic recognition of explicit English/Tanglish memory declarations. |
+| `ContextBuilder` | struct | Escapes and delimits validated facts as untrusted request context. |
+
+## Profile-memory flow
+
+```text
+CLI input -> MessageRouter
+  save route -> MemoryStore.update -> "Saved."
+  chat route -> MemoryStore.load -> AgentEngine.send(profile snapshot) -> AIProvider
+```
+
+`AgentEngine` never receives a store or path and performs no filesystem work. It receives
+an immutable `ProfileMemory` snapshot and uses the injected pure `MemoryContextBuilding`
+protocol. Empty memory leaves existing requests unchanged.
+
+The JSON file remains compatible with the Node agent's root object. Unknown string and
+non-string values round-trip through `JSONValue`; only keys and strings passing current
+validation are displayed or sent to the model. Existing files are copied to the adjacent
+`.backup` path before their first mutation. A malformed file causes a typed error and is
+never replaced.
+
+### V1 ownership and numeric limits
+
+One process and one `JSONFileMemoryStore` instance exclusively own each configured profile
+path. Actor isolation serializes that instance, while atomic replacement prevents torn
+writes. V1 has no inter-process lock. Running the Node and Swift agents—or two Swift store
+instances—against the same path can race between load and save, with the last writer
+silently discarding the other's update. Operators must stop one writer before starting
+another or configure distinct paths.
+
+`JSONValue` uses Foundation `Decimal` for numbers. This preserves base-10 values within
+Decimal's supported precision, including integers above 2^53, but arbitrary-precision JSON
+numbers are outside V1 support. Profile facts needing more than 38 significant digits must
+be stored as strings.
 
 ## Key decision: the turn protocol (actor reentrancy)
 
@@ -177,26 +214,12 @@ assertions.
   until the request returns.
 - The Windows `URLSession` behaviours above were observed with Swift 6.4.2 and may
   change in later toolchains.
-- Personal profile memory, routing, notes and forex tools still exist only in Node.js.
+- Notes and forex tools still exist only in Node.js.
 - Apple platforms (`.macOS(.v14)`, `.iOS(.v17)`) are declared in `Package.swift` but
   **have not been built or tested**. Only Windows x64 with Swift 6.4.2 has been verified.
 
-## Migration path: Milestone 2 (suggested)
+## Later migration path
 
-Goal: bring the Node agent's **personal profile memory** into Swift, behind protocols.
-
-1. `ProfileMemory` value type plus a `MemoryStore` protocol in a new `AgentMemory`
-   module. Add a JSON file implementation compatible with `memory/profile.json`, with the
-   file path injected and never hardcoded.
-2. A `ContextBuilder` protocol, so `AgentEngine.makeRequest` can inject the
-   "Known user memory" system section that the Node `formatMemory()` produces.
-3. Port the deterministic memory routes from `src/router.js` (`my name is …`,
-   `my preferred language is …`, Tanglish variants) into a pure, table-tested Swift
-   `MessageRouter`. Leave LLM tool selection for a later milestone.
-4. Optional: `ConversationStore` for saving and resuming sessions (`Conversation` is
-   already `Codable`).
-5. Keep the Node agent as the reference implementation until the Swift version matches
-   it, using shared test fixtures where possible.
-
-Later milestones: streaming responses, tool protocol and notes tools, forex research
-port, then a native UI (Windows first, then the iOS/macOS shells reusing `AgentCore`).
+Keep the Node agent as the reference implementation while later milestones add streaming,
+a tool protocol, notes, forex research, and finally native UI shells reusing `AgentCore`.
+Conversation persistence and cloud/profile synchronization remain explicitly out of scope.
