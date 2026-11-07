@@ -89,10 +89,17 @@ public actor ChatSession {
     }
 
     /// Releases the session after a failed or cancelled turn without touching history.
-    public func failTurn(_ turn: PendingTurn, error: AIServiceError) {
-        guard let current = activeTurn, current.id == turn.id else { return }
-        lastFailure = error
+    ///
+    /// - Returns: The error that was recorded. A turn cancelled via `cancelActiveTurn()`
+    ///   always records `.cancelled`, whatever the provider did afterwards, so callers
+    ///   report the user's cancellation instead of a secondary error.
+    @discardableResult
+    public func failTurn(_ turn: PendingTurn, error: AIServiceError) -> AIServiceError {
+        guard let current = activeTurn, current.id == turn.id else { return error }
+        let recorded: AIServiceError = current.isCancelled ? .cancelled : error
+        lastFailure = recorded
         activeTurn = nil
+        return recorded
     }
 
     /// Cancels the in-flight turn, if any.

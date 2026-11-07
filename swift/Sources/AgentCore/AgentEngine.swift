@@ -18,8 +18,9 @@ public struct AgentEngine: Sendable {
     public var configuration: ModelConfiguration
     /// Prepended to every request; never stored in session history.
     public var systemPrompt: String?
-    /// Maximum committed history messages sent as context (oldest are dropped first).
-    /// `nil` sends the full history.
+    /// Maximum committed history messages sent as context (oldest turns are dropped first,
+    /// never splitting a user/assistant pair). `nil` sends the full history; `0` or a
+    /// negative value sends none.
     public var maxContextMessages: Int?
 
     public init(
@@ -70,19 +71,20 @@ public struct AgentEngine: Sendable {
             // `Task` erases typed throws to `any Error`; restore the typed error.
             let serviceError = (error as? AIServiceError)
                 ?? (error is CancellationError ? .cancelled : .modelError(String(describing: error)))
-            await session.failTurn(turn, error: serviceError)
-            throw AgentError(serviceError)
+            let recorded = await session.failTurn(turn, error: Task.isCancelled ? .cancelled : serviceError)
+            throw AgentError(recorded)
+        }
+
+        // Cancellation takes precedence over validating the reply.
+        if Task.isCancelled {
+            await session.failTurn(turn, error: .cancelled)
+            throw .cancelled
         }
 
         let content = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty else {
-            await session.failTurn(turn, error: .emptyResponse)
-            throw .provider(.emptyResponse)
-        }
-
-        if Task.isCancelled {
-            await session.failTurn(turn, error: .cancelled)
-            throw .cancelled
+            let recorded = await session.failTurn(turn, error: .emptyResponse)
+            throw AgentError(recorded)
         }
 
         do {
@@ -102,10 +104,7 @@ public struct AgentEngine: Sendable {
 
     /// Builds the provider request: optional system prompt + trimmed history + pending user message.
     public func makeRequest(for turn: PendingTurn) -> AIRequest {
-        var history = turn.history
-        if let limit = maxContextMessages, history.count > limit {
-            history = Array(history.suffix(max(limit, 0)))
-        }
+        let history = Self.trimmedHistory(turn.history, limit: maxContextMessages)
 
         var messages: [ChatMessage] = []
         if let systemPrompt, !systemPrompt.isEmpty {
@@ -115,5 +114,24 @@ public struct AgentEngine: Sendable {
         messages.append(turn.userMessage)
 
         return AIRequest(messages: messages, configuration: configuration)
+    }
+
+    /// Keeps at most `limit` of the most recent messages without splitting a turn.
+    ///
+    /// - `nil`: full history.
+    /// - `0` or negative: no history (only the new user message is sent).
+    /// - Otherwise: the newest `limit` messages, then any leading non-user messages are
+    ///   dropped so context always starts at a user message. An odd limit therefore
+    ///   rounds down to whole user/assistant pairs.
+    static func trimmedHistory(_ history: [ChatMessage], limit: Int?) -> [ChatMessage] {
+        guard let limit else { return history }
+        guard limit > 0 else { return [] }
+        guard history.count > limit else { return history }
+
+        var trimmed = history.suffix(limit)
+        while let first = trimmed.first, first.role != .user {
+            trimmed = trimmed.dropFirst()
+        }
+        return Array(trimmed)
     }
 }

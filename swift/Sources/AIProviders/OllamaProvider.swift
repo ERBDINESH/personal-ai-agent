@@ -12,16 +12,27 @@ public struct OllamaProvider: AIProvider {
     public let chatEndpoint: URL
     public let versionEndpoint: URL
     public let timeout: TimeInterval
+    /// Timeout for the reachability probe sent before each chat. `nil` disables probing.
+    public let availabilityTimeout: TimeInterval?
     private let transport: any HTTPTransport
 
     /// - Parameters:
     ///   - baseURL: Server root, e.g. `http://127.0.0.1:11434`.
-    ///   - timeout: Per-request timeout. Local models can be slow on first load, so the default is generous.
+    ///   - timeout: Chat request timeout. Local models can be slow on first load, so the default is generous.
+    ///   - availabilityTimeout: Short timeout for the `GET /api/version` probe sent before each chat
+    ///     (and after a chat timeout). On Windows a stopped server is otherwise only detected after
+    ///     the full chat `timeout`. `nil` disables probing.
     ///   - transport: HTTP implementation; inject a fake in tests.
-    public init(baseURL: URL, timeout: TimeInterval = 120, transport: any HTTPTransport = URLSessionTransport()) {
+    public init(
+        baseURL: URL,
+        timeout: TimeInterval = 120,
+        availabilityTimeout: TimeInterval? = 3,
+        transport: any HTTPTransport = URLSessionTransport()
+    ) {
         self.chatEndpoint = baseURL.appendingPathComponent("api").appendingPathComponent("chat")
         self.versionEndpoint = baseURL.appendingPathComponent("api").appendingPathComponent("version")
         self.timeout = timeout
+        self.availabilityTimeout = availabilityTimeout
         self.transport = transport
     }
 
@@ -29,6 +40,7 @@ public struct OllamaProvider: AIProvider {
     public init(
         baseURLString: String = OllamaProvider.defaultBaseURLString,
         timeout: TimeInterval = 120,
+        availabilityTimeout: TimeInterval? = 3,
         transport: any HTTPTransport = URLSessionTransport()
     ) throws(AIServiceError) {
         guard
@@ -39,7 +51,7 @@ public struct OllamaProvider: AIProvider {
         else {
             throw .invalidConfiguration("Invalid Ollama base URL: \(baseURLString)")
         }
-        self.init(baseURL: url, timeout: timeout, transport: transport)
+        self.init(baseURL: url, timeout: timeout, availabilityTimeout: availabilityTimeout, transport: transport)
     }
 
     public func generate(_ request: AIRequest) async throws(AIServiceError) -> AIResponse {
@@ -47,12 +59,15 @@ public struct OllamaProvider: AIProvider {
 
         if Task.isCancelled { throw .cancelled }
 
+        try await ensureReachable()
+
         let data: Data
         let httpResponse: HTTPURLResponse
         do {
             (data, httpResponse) = try await transport.send(urlRequest)
         } catch {
-            throw Self.mapTransportError(error)
+            let mapped = Self.mapTransportError(error)
+            throw mapped == .timedOut ? await classifyTimeout() : mapped
         }
 
         // Some Foundation implementations complete the request even after the task
@@ -65,11 +80,11 @@ public struct OllamaProvider: AIProvider {
     /// Quick reachability check (`GET /api/version`) that returns the server version.
     ///
     /// On Windows, Foundation's `URLSession` does not fail fast when nothing is listening
-    /// on the port; it waits for the full request timeout. Generation needs a long timeout,
-    /// so callers use this short probe to detect a stopped server early. A timeout here is
-    /// reported as `.connectionFailed`.
+    /// on `127.0.0.1`; it waits for the full request timeout. Generation needs a long timeout,
+    /// so this short probe detects a stopped server early. A timeout here is reported as
+    /// `.connectionFailed`.
     public func checkAvailability(timeout probeTimeout: TimeInterval = 3) async throws(AIServiceError) -> String {
-        var urlRequest = URLRequest(url: versionEndpoint, timeoutInterval: probeTimeout)
+        var urlRequest = Self.urlRequest(url: versionEndpoint, timeout: probeTimeout)
         urlRequest.httpMethod = "GET"
 
         let data: Data
@@ -91,7 +106,53 @@ public struct OllamaProvider: AIProvider {
         }
     }
 
+    // MARK: - Availability strategy
+
+    /// Fails fast only when the server is unreachable. Other probe outcomes (HTTP errors,
+    /// unexpected bodies from proxies or old servers) let the chat request proceed.
+    private func ensureReachable() async throws(AIServiceError) {
+        guard let availabilityTimeout else { return }
+        do {
+            _ = try await checkAvailability(timeout: availabilityTimeout)
+        } catch {
+            switch error {
+            case .connectionFailed, .cancelled:
+                throw error
+            default:
+                return
+            }
+        }
+    }
+
+    /// After a chat timeout, distinguishes "server went away" from "model is slow".
+    private func classifyTimeout() async -> AIServiceError {
+        guard let availabilityTimeout else { return .timedOut }
+        do {
+            _ = try await checkAvailability(timeout: availabilityTimeout)
+            return .timedOut
+        } catch {
+            switch error {
+            case .connectionFailed, .cancelled:
+                return error
+            default:
+                return .timedOut
+            }
+        }
+    }
+
     // MARK: - Request building
+
+    /// Builds a request whose timeout is honoured on every platform.
+    ///
+    /// swift-corelibs-foundation on Windows (verified with Swift 6.4.2) ignores the value
+    /// passed to `URLRequest(url:cachePolicy:timeoutInterval:)` and falls back to the
+    /// session default (60 s), even though the property reads back correctly. Assigning
+    /// the property explicitly is honoured.
+    static func urlRequest(url: URL, timeout: TimeInterval) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
+        return request
+    }
 
     func makeURLRequest(for request: AIRequest) throws(AIServiceError) -> URLRequest {
         let model = request.configuration.model.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -106,7 +167,7 @@ public struct OllamaProvider: AIProvider {
             options: request.configuration.temperature.map { OllamaChatRequest.Options(temperature: $0) }
         )
 
-        var urlRequest = URLRequest(url: chatEndpoint, timeoutInterval: timeout)
+        var urlRequest = Self.urlRequest(url: chatEndpoint, timeout: timeout)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")

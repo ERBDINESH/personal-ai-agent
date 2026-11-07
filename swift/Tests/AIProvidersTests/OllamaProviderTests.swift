@@ -32,7 +32,7 @@ struct OllamaRequestEncodingTests {
         let provider = try OllamaProvider(transport: transport)
         _ = try await provider.generate(sampleRequest)
 
-        let sent = try #require(await transport.recorder.requests.first)
+        let sent = try #require(await transport.recorder.chatRequests.first)
         #expect(sent.httpMethod == "POST")
         #expect(sent.url?.absoluteString == "http://127.0.0.1:11434/api/chat")
         #expect(sent.value(forHTTPHeaderField: "Content-Type") == "application/json")
@@ -56,7 +56,7 @@ struct OllamaRequestEncodingTests {
         request.configuration.temperature = 0.2
         _ = try await provider.generate(request)
 
-        let body = try #require(await transport.recorder.requests.first?.httpBody)
+        let body = try #require(await transport.recorder.chatRequests.first?.httpBody)
         let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
         let options = try #require(json["options"] as? [String: Any])
         #expect(options["temperature"] as? Double == 0.2)
@@ -156,11 +156,11 @@ struct OllamaResponseTests {
 struct OllamaAvailabilityTests {
     @Test("Returns the server version via GET /api/version with a short timeout")
     func reachable() async throws {
-        let transport = StubTransport.ok("{\"version\":\"0.12.0\"}")
+        let transport = StubTransport(outcome: .response(status: 500, body: ""), version: .response(status: 200, body: "{\"version\":\"0.12.0\"}"))
         let provider = try OllamaProvider(transport: transport)
 
         #expect(try await provider.checkAvailability(timeout: 2) == "0.12.0")
-        let sent = try #require(await transport.recorder.requests.first)
+        let sent = try #require(await transport.recorder.versionRequests.first)
         #expect(sent.httpMethod == "GET")
         #expect(sent.url?.absoluteString == "http://127.0.0.1:11434/api/version")
         #expect(sent.timeoutInterval == 2)
@@ -168,7 +168,7 @@ struct OllamaAvailabilityTests {
 
     @Test("A probe timeout is reported as .connectionFailed")
     func timeoutMeansUnreachable() async throws {
-        let provider = try OllamaProvider(transport: StubTransport(outcome: .failure(.timedOut)))
+        let provider = try OllamaProvider(transport: StubTransport(outcome: .response(status: 200, body: ""), version: .failure(.timedOut)))
         do {
             _ = try await provider.checkAvailability()
             Issue.record("Expected failure")
@@ -182,7 +182,7 @@ struct OllamaAvailabilityTests {
 
     @Test("A non-Ollama server is reported as .decodingFailed")
     func unexpectedBody() async throws {
-        let provider = try OllamaProvider(transport: StubTransport.ok("<html></html>"))
+        let provider = try OllamaProvider(transport: StubTransport(outcome: .response(status: 200, body: ""), version: .response(status: 200, body: "<html></html>")))
         do {
             _ = try await provider.checkAvailability()
             Issue.record("Expected failure")
@@ -225,7 +225,7 @@ struct OllamaTransportFailureTests {
 
         let task = Task { await capturedError(provider) }
         // Wait until the request has reached the transport, then cancel.
-        for _ in 0..<2_000 where await transport.recorder.requests.isEmpty {
+        for _ in 0..<2_000 where await transport.recorder.chatRequests.isEmpty {
             try await Task.sleep(for: .milliseconds(1))
         }
         task.cancel()

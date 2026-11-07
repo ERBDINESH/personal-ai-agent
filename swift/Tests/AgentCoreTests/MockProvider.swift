@@ -10,6 +10,8 @@ actor MockProvider: AIProvider {
         case fail(AIServiceError)
         /// Suspends until `release()` is called, then replies.
         case replyAfterRelease(String)
+        /// Suspends until `release()` is called, then throws.
+        case failAfterRelease(AIServiceError)
         /// Suspends until the calling task is cancelled, then throws `.cancelled`.
         case hangUntilCancelled
     }
@@ -37,6 +39,9 @@ actor MockProvider: AIProvider {
         case .replyAfterRelease(let text):
             await withCheckedContinuation { gate = $0 }
             return AIResponse(content: text, model: "mock-model")
+        case .failAfterRelease(let error):
+            await withCheckedContinuation { gate = $0 }
+            throw error
         case .hangUntilCancelled:
             do {
                 try await Task.sleep(for: .seconds(3600))
