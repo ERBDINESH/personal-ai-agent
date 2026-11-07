@@ -65,6 +65,20 @@ validation are displayed or sent to the model. Existing files are copied to the 
 `.backup` path before their first mutation. A malformed file causes a typed error and is
 never replaced.
 
+### V1 ownership and numeric limits
+
+One process and one `JSONFileMemoryStore` instance exclusively own each configured profile
+path. Actor isolation serializes that instance, while atomic replacement prevents torn
+writes. V1 has no inter-process lock. Running the Node and Swift agents—or two Swift store
+instances—against the same path can race between load and save, with the last writer
+silently discarding the other's update. Operators must stop one writer before starting
+another or configure distinct paths.
+
+`JSONValue` uses Foundation `Decimal` for numbers. This preserves base-10 values within
+Decimal's supported precision, including integers above 2^53, but arbitrary-precision JSON
+numbers are outside V1 support. Profile facts needing more than 38 significant digits must
+be stored as strings.
+
 ## Key decision: the turn protocol (actor reentrancy)
 
 Swift actors are **reentrant**. While a method is suspended at `await`, other callers

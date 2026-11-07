@@ -4,7 +4,9 @@ import Foundation
 /// version of the app does not understand yet.
 public enum JSONValue: Codable, Sendable, Equatable {
     case string(String)
-    case number(Double)
+    /// A base-10 number. `Decimal` avoids the binary rounding and >2^53 integer
+    /// corruption that would occur if unknown JSON numbers were stored as `Double`.
+    case number(Decimal)
     case bool(Bool)
     case object([String: JSONValue])
     case array([JSONValue])
@@ -16,7 +18,7 @@ public enum JSONValue: Codable, Sendable, Equatable {
             self = .null
         } else if let value = try? container.decode(Bool.self) {
             self = .bool(value)
-        } else if let value = try? container.decode(Double.self) {
+        } else if let value = try? container.decode(Decimal.self) {
             self = .number(value)
         } else if let value = try? container.decode(String.self) {
             self = .string(value)

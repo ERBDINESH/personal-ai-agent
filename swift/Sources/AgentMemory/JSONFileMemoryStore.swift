@@ -51,6 +51,10 @@ public struct FoundationMemoryFileSystem: MemoryFileSystem {
 }
 
 /// Actor-isolated JSON persistence with atomic writes and a one-time import backup.
+///
+/// The actor serializes callers of this store instance only. V1 intentionally does
+/// not implement an inter-process file lock: exactly one process and store instance
+/// must own a configured profile path at a time.
 public actor JSONFileMemoryStore: MemoryStore {
     public nonisolated let fileURL: URL
     public nonisolated var backupURL: URL {

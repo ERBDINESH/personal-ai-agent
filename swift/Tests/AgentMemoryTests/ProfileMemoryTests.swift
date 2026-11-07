@@ -41,4 +41,22 @@ struct ProfileMemoryTests {
         #expect(roundTrip.rawValues["future"] == .object(["enabled": .bool(true)]))
         #expect(roundTrip.rawValues["version"] == .number(2))
     }
+
+    @Test("JSON numbers retain base-10 precision beyond Double")
+    func preservesNumericPrecision() throws {
+        let source = Data(#"{"largeInteger":9007199254740993,"preciseDecimal":1234567890.123456789012345678}"#.utf8)
+        var memory = try JSONDecoder().decode(ProfileMemory.self, from: source)
+        try memory.set("Tanglish", forKey: "preferredLanguage")
+
+        let encoded = try JSONEncoder().encode(memory)
+        let encodedText = try #require(String(data: encoded, encoding: .utf8))
+        let roundTrip = try JSONDecoder().decode(ProfileMemory.self, from: encoded)
+        let expectedInteger = try #require(Decimal(string: "9007199254740993"))
+        let expectedDecimal = try #require(Decimal(string: "1234567890.123456789012345678"))
+
+        #expect(encodedText.contains("9007199254740993"))
+        #expect(encodedText.contains("1234567890.123456789012345678"))
+        #expect(roundTrip.rawValues["largeInteger"] == .number(expectedInteger))
+        #expect(roundTrip.rawValues["preciseDecimal"] == .number(expectedDecimal))
+    }
 }

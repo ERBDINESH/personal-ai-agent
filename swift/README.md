@@ -104,6 +104,19 @@ the store creates `profile.json.backup` and never replaces that backup. Malforme
 reported and left untouched. Both the profile and backup are ignored by Git. To keep
 separate profiles, launch with a different `PERSONAL_AI_MEMORY_PATH` for each profile.
 
+V1 uses a **single-writer ownership rule**: only one process and one store instance may
+own a given profile path at a time. The store actor serializes access inside that instance,
+but there is no cross-process file lock. Do not run the Node and Swift CLIs against the
+same `profile.json` simultaneously; their independent read-modify-write cycles can cause
+last-writer-wins loss even though atomic replacement prevents a partially written file.
+Stop one CLI before starting the other, or give each one a separate profile path.
+
+Unknown JSON numbers are represented with Foundation `Decimal`, so base-10 values within
+its supported precision (up to 38 significant digits) round-trip without the `Double`
+loss that affects integers above 2^53. Numbers outside `Decimal`'s representable range or
+precision are not supported by this V1 compatibility layer; the legacy profile schema
+should use strings for facts requiring arbitrary numeric precision.
+
 Saved strings are added to the system prompt as escaped, delimited, untrusted data. The
 model is told not to follow instructions in stored keys or values and not to invent
 missing profile details.
