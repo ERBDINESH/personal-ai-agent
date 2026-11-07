@@ -1,10 +1,27 @@
 import AIProviders
 import AgentCore
+import AgentMemory
 import ChatDomain
 import Testing
 
 @Suite("AgentEngine conversation flow")
 struct AgentEngineConversationTests {
+    @Test("Injects profile context without storing it in chat history")
+    func profileMemoryContext() async throws {
+        let provider = MockProvider([.reply("Tanglish")])
+        let engine = AgentEngine(provider: provider, systemPrompt: "SYSTEM")
+        let memory = try ProfileMemory(facts: ["preferredLanguage": "Tanglish"])
+        let session = ChatSession()
+
+        _ = try await engine.send("What is my preferred language?", in: session, profileMemory: memory)
+
+        let request = try #require(await provider.requests.first)
+        #expect(request.messages.first?.role == .system)
+        #expect(request.messages.first?.content.contains("Preferred language: \"Tanglish\"") == true)
+        #expect(await session.messages.map(\.content) == ["What is my preferred language?", "Tanglish"])
+        #expect(await session.messages.allSatisfy { !$0.content.contains("<profile-memory>") })
+    }
+
     @Test("Sends full multi-turn context to the provider")
     func multiTurnContext() async throws {
         let provider = MockProvider([.reply("Nice choice!"), .reply("Swift.")])

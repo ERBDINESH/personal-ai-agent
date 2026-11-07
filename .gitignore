@@ -2,4 +2,5 @@ node_modules/
 .env
 *.log
 memory/profile.json
+memory/profile.json.backup
 workspace/personal-notes.txt

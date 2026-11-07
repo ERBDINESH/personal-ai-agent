@@ -1,4 +1,5 @@
 import AIProviders
+import AgentMemory
 import ChatDomain
 
 /// Coordinates a `ChatSession` and an `AIProvider` for one turn at a time.
@@ -22,24 +23,32 @@ public struct AgentEngine: Sendable {
     /// never splitting a user/assistant pair). `nil` sends the full history; `0` or a
     /// negative value sends none.
     public var maxContextMessages: Int?
+    /// Pure formatter for optional profile memory. Persistence stays outside the engine.
+    public var contextBuilder: any MemoryContextBuilding
 
     public init(
         provider: any AIProvider,
         configuration: ModelConfiguration = ModelConfiguration(),
         systemPrompt: String? = AgentEngine.defaultSystemPrompt,
-        maxContextMessages: Int? = 40
+        maxContextMessages: Int? = 40,
+        contextBuilder: any MemoryContextBuilding = ContextBuilder()
     ) {
         self.provider = provider
         self.configuration = configuration
         self.systemPrompt = systemPrompt
         self.maxContextMessages = maxContextMessages
+        self.contextBuilder = contextBuilder
     }
 
     /// Sends `text` as the next user turn in `session` and returns the committed reply.
     ///
     /// On any failure (including cancellation) the session history is unchanged and
     /// the session is free for a retry.
-    public func send(_ text: String, in session: ChatSession) async throws(AgentError) -> AgentReply {
+    public func send(
+        _ text: String,
+        in session: ChatSession,
+        profileMemory: ProfileMemory = .empty
+    ) async throws(AgentError) -> AgentReply {
         let turn: PendingTurn
         do {
             turn = try await session.beginTurn(text)
@@ -47,7 +56,7 @@ public struct AgentEngine: Sendable {
             throw AgentError(error)
         }
 
-        let request = makeRequest(for: turn)
+        let request = makeRequest(for: turn, profileMemory: profileMemory)
         let provider = self.provider
 
         // Run the model call in its own task so either the caller's task cancellation
@@ -103,12 +112,16 @@ public struct AgentEngine: Sendable {
     }
 
     /// Builds the provider request: optional system prompt + trimmed history + pending user message.
-    public func makeRequest(for turn: PendingTurn) -> AIRequest {
+    public func makeRequest(
+        for turn: PendingTurn,
+        profileMemory: ProfileMemory = .empty
+    ) -> AIRequest {
         let history = Self.trimmedHistory(turn.history, limit: maxContextMessages)
 
         var messages: [ChatMessage] = []
-        if let systemPrompt, !systemPrompt.isEmpty {
-            messages.append(.system(systemPrompt))
+        if let prompt = contextBuilder.buildSystemPrompt(basePrompt: systemPrompt, memory: profileMemory),
+           !prompt.isEmpty {
+            messages.append(.system(prompt))
         }
         messages.append(contentsOf: history)
         messages.append(turn.userMessage)
